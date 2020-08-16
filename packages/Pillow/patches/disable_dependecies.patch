@@ -1,0 +1,11 @@
+--- Pillow-7.2.0.back/setup.py	2020-06-30 01:55:24.000000000 -0700
++++ Pillow-7.2.0/setup.py	2020-08-15 10:03:31.414448181 -0700
+@@ -299,6 +299,8 @@
+             return feat in self.required
+ 
+         def want(self, feat):
++            if feat == 'tiff' or feat == 'lcms' or feat == 'webp' or feat == 'jpeg2000' or feat == 'xcb' or feat == 'imagequant' or feat == 'webpmux':
++                return False
+             return getattr(self, feat) is None
+ 
+         def __iter__(self):
