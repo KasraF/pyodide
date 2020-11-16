@@ -1,0 +1,9 @@
+package:
+  name: CSE8AImage
+  version: "0.1"
+requirements:
+  run:
+    - Pillow
+    - distlib
+source:
+  path: CSE8AImage
