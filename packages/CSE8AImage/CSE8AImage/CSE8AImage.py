@@ -2,27 +2,15 @@
 
 import numpy as np
 from PIL import Image
-from js import XMLHttpRequest
-
-def download_file(filename):
-    req = XMLHttpRequest.new()
-    req.open('GET', '/editor/' + filename, False)
-    req.responseType = 'arraybuffer'
-    req.send(None)
-
-    f = open(filename, 'wb')
-    f.write(bytearray(req.response))
-    f.close()
 
 def load_img(filename):
-    download_file(filename)
     pil_img = Image.open(filename)
     arr = np.array(pil_img.getdata(), dtype=np.uint8).reshape(pil_img.height, pil_img.width, 3)
-    img = [ [ (int(p[0]),int(p[1]),int(p[2])) for p in row ] for row in arr ]
-    return img
+    # img = [ [ (int(p[0]),int(p[1]),int(p[2])) for p in row ] for row in arr ]
+    return arr
 
 def save_img(img, filename):
-    arr = np.asarray(img, dtype=np.uint8)
+    # arr = np.asarray(img, dtype=np.uint8)
     pil_img = Image.fromarray(arr)
     pil_img.save(filename, format='png')
 
@@ -30,7 +18,7 @@ def create_img(height, width, color):
     result = [None] * height
     for i in range(len(result)):
         result[i] = [color] * width
-    return result
+    return np.array(result, dtype=np.uint8)
 
 def height(img):
     return len(img)
@@ -40,7 +28,7 @@ def width(img):
 
 def img_str_to_file(img, filename):
     # Converting to integer pixel values
-    img = np.asarray(img, dtype=np.uint8)
+    # img = np.asarray(img, dtype=np.uint8)
 
     # Calculating max length
     max_length = len(str((255,255,255)))
