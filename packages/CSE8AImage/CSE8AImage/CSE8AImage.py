@@ -6,12 +6,10 @@ from PIL import Image
 def load_img(filename):
     pil_img = Image.open(filename)
     arr = np.array(pil_img.getdata(), dtype=np.uint8).reshape(pil_img.height, pil_img.width, 3)
-    # img = [ [ (int(p[0]),int(p[1]),int(p[2])) for p in row ] for row in arr ]
     return arr
 
 def save_img(img, filename):
-    # arr = np.asarray(img, dtype=np.uint8)
-    pil_img = Image.fromarray(arr)
+    pil_img = Image.fromarray(img)
     pil_img.save(filename, format='png')
 
 def create_img(height, width, color):
@@ -27,9 +25,6 @@ def width(img):
     return len(img[0])
 
 def img_str_to_file(img, filename):
-    # Converting to integer pixel values
-    # img = np.asarray(img, dtype=np.uint8)
-
     # Calculating max length
     max_length = len(str((255,255,255)))
 
