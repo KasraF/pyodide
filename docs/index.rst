@@ -23,24 +23,19 @@ The Python scientific stack, compiled to WebAssembly.
 Using Pyodide
 =============
 
-Pyodide may be used in several ways, including in an Iodide notebook, directly
-from JavaScript, or to execute Python scripts asynchronously in a web worker.
-Although still experimental, additional packages may be installed from PyPI
-to be used with Pyodide.
+Pyodide may be used in several ways: directly from JavaScript, or to execute
+Python scripts asynchronously in a web worker. Although still experimental,
+additional packages may be installed from PyPI to be used with Pyodide.
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
    :caption: Usage
 
-   using_pyodide_from_iodide.md
    using_pyodide_from_javascript.md
    using_pyodide_from_webworker.md
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Extending
-
-   pypi.md
+   serving_pyodide_packages.md
+   loading_packages.md
+   type_conversions.md
    api_reference.md
    faq.md
 
@@ -60,7 +55,6 @@ information about the project's organization.
 
    building_from_sources.md
    new_packages.md
-   type_conversions.md
    contributing.md
    testing.md
 

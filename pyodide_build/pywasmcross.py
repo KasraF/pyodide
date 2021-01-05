@@ -31,6 +31,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import shutil
 import sys
 
 
@@ -39,7 +40,7 @@ import sys
 from pyodide_build import common
 
 
-ROOTDIR = common.ROOTDIR
+TOOLSDIR = common.TOOLSDIR
 symlinks = set(["cc", "c++", "ld", "ar", "gcc", "gfortran"])
 
 
@@ -55,8 +56,8 @@ def collect_args(basename):
     # native compiler
     env = dict(os.environ)
     path = env["PATH"]
-    while str(ROOTDIR) + ":" in path:
-        path = path.replace(str(ROOTDIR) + ":", "")
+    while str(TOOLSDIR) + ":" in path:
+        path = path.replace(str(TOOLSDIR) + ":", "")
     env["PATH"] = path
 
     skip_host = "SKIP_HOST" in os.environ
@@ -91,8 +92,12 @@ def collect_args(basename):
 
     if skip:
         sys.exit(0)
+    compiler_command = [basename]
+    if shutil.which("ccache") is not None:
+        # Enable ccache if it's installed
+        compiler_command.insert(0, "ccache")
 
-    sys.exit(subprocess.run([basename] + sys.argv[1:], env=env).returncode)
+    sys.exit(subprocess.run(compiler_command + sys.argv[1:], env=env).returncode)
 
 
 def make_symlinks(env):
@@ -102,12 +107,14 @@ def make_symlinks(env):
     """
     exec_path = Path(__file__).resolve()
     for symlink in symlinks:
-        symlink_path = ROOTDIR / symlink
+        symlink_path = TOOLSDIR / symlink
         if os.path.lexists(symlink_path) and not symlink_path.exists():
             # remove broken symlink so it can be re-created
             symlink_path.unlink()
-        if not symlink_path.exists():
+        try:
             symlink_path.symlink_to(exec_path)
+        except FileExistsError:
+            pass
         if symlink == "c++":
             var = "CXX"
         else:
@@ -118,11 +125,15 @@ def make_symlinks(env):
 def capture_compile(args):
     env = dict(os.environ)
     make_symlinks(env)
-    env["PATH"] = str(ROOTDIR) + ":" + os.environ["PATH"]
+    env["PATH"] = str(TOOLSDIR) + ":" + os.environ["PATH"]
 
-    result = subprocess.run(
-        [Path(args.host) / "bin" / "python3", "setup.py", "install"], env=env
-    )
+    cmd = [sys.executable, "setup.py", "install"]
+    if args.install_dir == "skip":
+        cmd[-1] = "build"
+    elif args.install_dir != "":
+        cmd.extend(["--home", args.install_dir])
+
+    result = subprocess.run(cmd, env=env)
     if result.returncode != 0:
         build_log_path = Path("build.log")
         if build_log_path.exists():
@@ -185,7 +196,7 @@ def handle_command(line, args, dryrun=False):
        an iterable with the compilation arguments
     args : {object, namedtuple}
        an container with additional compilation options,
-       in particular containing ``args.cflags`` and ``args.ldflags``
+       in particular containing ``args.cflags``, ``args.cxxflags``, and ``args.ldflags``
     dryrun : bool, default=False
        if True do not run the resulting command, only return it
 
@@ -193,12 +204,19 @@ def handle_command(line, args, dryrun=False):
     --------
 
     >>> from collections import namedtuple
-    >>> Args = namedtuple('args', ['cflags', 'ldflags'])
-    >>> args = Args(cflags='', ldflags='')
+    >>> Args = namedtuple('args', ['cflags', 'cxxflags', 'ldflags', 'host','replace_libs'])
+    >>> args = Args(cflags='', cxxflags='', ldflags='', host='',replace_libs='')
     >>> handle_command(['gcc', 'test.c'], args, dryrun=True)
     emcc test.c
     ['emcc', 'test.c']
     """
+    # some libraries have different names on wasm e.g. png16 = png
+    replace_libs = {}
+    for l in args.replace_libs.split(";"):
+        if len(l) > 0:
+            from_lib, to_lib = l.split("=")
+            replace_libs[from_lib] = to_lib
+
     # This is a special case to skip the compilation tests in numpy that aren't
     # actually part of the build
     for arg in line:
@@ -224,30 +242,39 @@ def handle_command(line, args, dryrun=False):
     else:
         new_args = ["emcc"]
         # distutils doesn't use the c++ compiler when compiling c++ <sigh>
-        if any(arg.endswith(".cpp") for arg in line):
+        if any(arg.endswith((".cpp", ".cc")) for arg in line):
             new_args = ["em++"]
     library_output = line[-1].endswith(".so")
 
     if library_output:
         new_args.extend(args.ldflags.split())
-    elif new_args[0] in ("emcc", "em++"):
+    elif new_args[0] == "emcc":
         new_args.extend(args.cflags.split())
+    elif new_args[0] == "em++":
+        new_args.extend(args.cflags.split() + args.cxxflags.split())
 
     lapack_dir = None
 
     # Go through and adjust arguments
     for arg in line[1:]:
         if arg.startswith("-I"):
-            # Don't include any system directories
-            if arg[2:].startswith("/usr"):
-                continue
             if (
-                str(Path(arg[2:]).resolve()).startswith(args.host)
+                str(Path(arg[2:]).resolve()).startswith(sys.prefix + "/include/python")
                 and "site-packages" not in arg
             ):
-                arg = arg.replace("-I" + args.host, "-I" + args.target)
+                arg = arg.replace("-I" + sys.prefix, "-I" + args.target)
+            # Don't include any system directories
+            elif arg[2:].startswith("/usr"):
+                continue
         # Don't include any system directories
         if arg.startswith("-L/usr"):
+            continue
+        if arg.startswith("-l"):
+            if arg[2:] in replace_libs:
+                arg = "-l" + replace_libs[arg[2:]]
+
+        # threading is disabled for now
+        if arg == "-pthread":
             continue
         # On Mac, we need to omit some darwin-specific arguments
         if arg in ["-bundle", "-undefined", "dynamic_lookup"]:
@@ -255,24 +282,21 @@ def handle_command(line, args, dryrun=False):
         # The native build is possibly multithreaded, but the emscripten one
         # definitely isn't
         arg = re.sub(r"/python([0-9]\.[0-9]+)m", r"/python\1", arg)
-        if arg.endswith(".o"):
-            arg = arg[:-2] + ".bc"
-            output = arg
-        elif arg.endswith(".so"):
+        if arg.endswith(".so"):
             arg = arg[:-3] + ".wasm"
             output = arg
 
         # Fix for scipy to link to the correct BLAS/LAPACK files
-        if arg.startswith("-L") and "CLAPACK-WA" in arg:
+        if arg.startswith("-L") and "CLAPACK" in arg:
             out_idx = line.index("-o")
             out_idx += 1
             module_name = line[out_idx]
             module_name = Path(module_name).name.split(".")[0]
 
             lapack_dir = arg.replace("-L", "")
-            # For convinience we determine needed scipy link libraries
+            # For convenience we determine needed scipy link libraries
             # here, instead of in patch files
-            link_libs = ["F2CLIBS/libf2c.bc", "blas_WA.bc"]
+            link_libs = ["F2CLIBS/libf2c.a", "blas_WA.a"]
             if module_name in [
                 "_flapack",
                 "_flinalg",
@@ -281,7 +305,7 @@ def handle_command(line, args, dryrun=False):
                 "_iterative",
                 "_arpack",
             ]:
-                link_libs.append("lapack_WA.bc")
+                link_libs.append("lapack_WA.a")
 
             for lib_name in link_libs:
                 arg = os.path.join(lapack_dir, f"{lib_name}")
@@ -297,6 +321,16 @@ def handle_command(line, args, dryrun=False):
             and "-L" in " ".join(line)
         ):
             new_args.append("-Os")
+            continue
+
+        if new_args[-1].startswith("-B") and "compiler_compat" in arg:
+            # conda uses custom compiler search paths with the compiler_compat folder.
+            # Ignore it.
+            del new_args[-1]
+            continue
+
+        # See https://github.com/emscripten-core/emscripten/issues/8650
+        if arg in ["-lfreetype", "-lz", "-lpng", "-lgfortran"]:
             continue
 
         new_args.append(arg)
@@ -349,7 +383,7 @@ def clean_out_native_artifacts():
 
 def install_for_distribution(args):
     commands = [
-        Path(args.host) / "bin" / "python3",
+        sys.executable,
         "setup.py",
         "install",
         "--skip-build",
@@ -395,6 +429,13 @@ def make_parser(parser):
             help="Extra compiling flags",
         )
         parser.add_argument(
+            "--cxxflags",
+            type=str,
+            nargs="?",
+            default=common.DEFAULTCXXFLAGS,
+            help="Extra C++ specific compiling flags",
+        )
+        parser.add_argument(
             "--ldflags",
             type=str,
             nargs="?",
@@ -402,18 +443,29 @@ def make_parser(parser):
             help="Extra linking flags",
         )
         parser.add_argument(
-            "--host",
-            type=str,
-            nargs="?",
-            default=common.HOSTPYTHON,
-            help="The path to the host Python installation",
-        )
-        parser.add_argument(
             "--target",
             type=str,
             nargs="?",
             default=common.TARGETPYTHON,
             help="The path to the target Python installation",
+        )
+        parser.add_argument(
+            "--install-dir",
+            type=str,
+            nargs="?",
+            default="",
+            help=(
+                "Directory for installing built host packages. Defaults to setup.py "
+                "default. Set to 'skip' to skip installation. Installation is "
+                "needed if you want to build other packages that depend on this one."
+            ),
+        )
+        parser.add_argument(
+            "--replace-libs",
+            type=str,
+            nargs="?",
+            default="",
+            help="Libraries to replace in final link",
         )
     return parser
 

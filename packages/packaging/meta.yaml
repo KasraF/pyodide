@@ -1,0 +1,14 @@
+package:
+  name: packaging
+  version: '20.8'
+source:
+  sha256: 78598185a7008a470d64526a8059de9aaa449238f280fc9eb6b13ba6c4109093
+  url: https://files.pythonhosted.org/packages/d7/c5/e81b9fb8033fe78a2355ea7b1774338e1dca2c9cbd2ee140211a9e6291ab/packaging-20.8.tar.gz
+
+requirements:
+  run:
+    - pyparsing
+
+test:
+  imports:
+  - packaging
