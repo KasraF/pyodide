@@ -3,7 +3,7 @@ package:
   version: "0.1"
 requirements:
   run:
-    - Pillow
+    - pillow
     - distlib
 source:
   path: CSE8AImage
